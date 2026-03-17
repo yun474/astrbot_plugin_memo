@@ -80,7 +80,7 @@ class MemoPlugin(Star):
         _ensure_dir()
 
         # ---- 读取配置 ----
-        cfg = context.get_config()  # 返回插件的配置字典（来自 _conf_schema.json）
+        cfg = context.get_config()
         self.split_session: bool = bool(cfg.get("split_session", True))
         self.split_user: bool = bool(cfg.get("split_user", False))
         self.max_entries: int = int(cfg.get("max_entries", 50))
@@ -92,47 +92,18 @@ class MemoPlugin(Star):
             f"max_entries={self.max_entries}"
         )
 
-        # ---- 注册 LLM Tools ----
-        self.context.register_llm_tool(
-            name="memo_read",
-            description=(
-                "读取当前上下文的持久化备忘录。"
-                "返回所有已保存的条目（字符串列表）。"
-                "当用户询问你是否记得某件事、或需要回顾历史信息时调用。"
-            ),
-            parameters={
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-            handler=self._tool_read,
-        )
-
-        self.context.register_llm_tool(
-            name="memo_write",
-            description=(
-                "向持久化备忘录中写入一条新记录。"
-                "当用户要求你记住某件事、或对话中出现值得长期保留的信息时调用。"
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "要写入的内容，简洁清晰地描述需要记住的事项。",
-                    }
-                },
-                "required": ["content"],
-            },
-            handler=self._tool_write,
-        )
-
     # ------------------------------------------------------------------
-    # LLM Tool handlers
+    # LLM Tools
     # ------------------------------------------------------------------
 
-    async def _tool_read(self, event: AstrMessageEvent, **kwargs):
-        """memo_read tool handler：返回当前 key 下的所有备忘条目。"""
+    @Star.llm_tool(name="memo_read")
+    async def memo_read(self, event: AstrMessageEvent):
+        '''
+        读取当前上下文的持久化备忘录，返回所有已保存的条目。
+        当用户询问你是否记得某件事、或需要回顾历史信息时调用。
+
+        Args:
+        '''
         key = _build_key(event, self.split_session, self.split_user)
         data = _load(key)
         entries = data.get("entries", [])
@@ -141,8 +112,15 @@ class MemoPlugin(Star):
         lines = "\n".join(f"{i + 1}. {e}" for i, e in enumerate(entries))
         return f"备忘录共 {len(entries)} 条：\n{lines}"
 
-    async def _tool_write(self, event: AstrMessageEvent, content: str = "", **kwargs):
-        """memo_write tool handler：追加一条记录，超出上限时删除最旧的。"""
+    @Star.llm_tool(name="memo_write")
+    async def memo_write(self, event: AstrMessageEvent, content: str):
+        '''
+        向持久化备忘录中写入一条新记录。
+        当用户要求你记住某件事、或对话中出现值得长期保留的信息时调用。
+
+        Args:
+            content(str): 要写入的内容，简洁清晰地描述需要记住的事项。
+        '''
         content = content.strip()
         if not content:
             return "写入失败：内容不能为空。"
@@ -152,10 +130,9 @@ class MemoPlugin(Star):
         entries: list = data.get("entries", [])
         entries.append(content)
 
-        # 超出上限时，移除最旧的条目
         if len(entries) > self.max_entries:
             removed = len(entries) - self.max_entries
-            entries = entries[-self.max_entries :]
+            entries = entries[-self.max_entries:]
             logger.info(f"[memo] key={key} 超出上限，已删除最旧 {removed} 条。")
 
         data["entries"] = entries
@@ -163,7 +140,7 @@ class MemoPlugin(Star):
         return f"已记录：{content}（当前共 {len(entries)} 条）"
 
     # ------------------------------------------------------------------
-    # 可选：管理指令（仅管理员可用）
+    # 管理指令（仅管理员可用）
     # ------------------------------------------------------------------
 
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -203,5 +180,5 @@ class MemoPlugin(Star):
         yield event.plain_result(f"✅ 已删除第 {index} 条：{removed}")
 
     async def terminate(self):
-        """插件卸载时的清理逻辑（当前无需释放资源）。"""
+        """插件卸载时的清理逻辑。"""
         logger.info("[memo] 插件已卸载。")
