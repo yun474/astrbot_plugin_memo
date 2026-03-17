@@ -10,7 +10,7 @@
 import json
 import os
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import Context, Star, register, llm_func
+from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 
 DATA_DIR = os.path.join("data", "plugin_memo")
@@ -83,11 +83,9 @@ class MemoPlugin(Star):
             f"max_entries={self.max_entries}"
         )
 
-    @llm_func(name="memo_read")
+    @filter.llm_tool(name="memo_read")
     async def memo_read(self, event: AstrMessageEvent):
-        '''
-        读取当前上下文的持久化备忘录，返回所有已保存的条目。
-        当用户询问你是否记得某件事、或需要回顾历史信息时调用。
+        '''读取当前上下文的持久化备忘录，返回所有已保存的条目。当用户询问你是否记得某件事、或需要回顾历史信息时调用。
 
         Args:
         '''
@@ -95,22 +93,22 @@ class MemoPlugin(Star):
         data = _load(key)
         entries = data.get("entries", [])
         if not entries:
-            return "备忘录为空，尚无任何记录。"
+            yield event.plain_result("备忘录为空，尚无任何记录。")
+            return
         lines = "\n".join(f"{i + 1}. {e}" for i, e in enumerate(entries))
-        return f"备忘录共 {len(entries)} 条：\n{lines}"
+        yield event.plain_result(f"备忘录共 {len(entries)} 条：\n{lines}")
 
-    @llm_func(name="memo_write")
+    @filter.llm_tool(name="memo_write")
     async def memo_write(self, event: AstrMessageEvent, content: str):
-        '''
-        向持久化备忘录中写入一条新记录。
-        当用户要求你记住某件事、或对话中出现值得长期保留的信息时调用。
+        '''向持久化备忘录中写入一条新记录。当用户要求你记住某件事、或对话中出现值得长期保留的信息时调用。
 
         Args:
-            content(str): 要写入的内容，简洁清晰地描述需要记住的事项。
+            content(string): 要写入的内容，简洁清晰地描述需要记住的事项。
         '''
         content = content.strip()
         if not content:
-            return "写入失败：内容不能为空。"
+            yield event.plain_result("写入失败：内容不能为空。")
+            return
 
         key = _build_key(event, self.split_session, self.split_user)
         data = _load(key)
@@ -124,7 +122,7 @@ class MemoPlugin(Star):
 
         data["entries"] = entries
         _save(key, data)
-        return f"已记录：{content}（当前共 {len(entries)} 条）"
+        yield event.plain_result(f"已记录：{content}（当前共 {len(entries)} 条）")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("memo_list")
