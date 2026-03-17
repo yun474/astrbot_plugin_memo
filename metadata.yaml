@@ -1,0 +1,5 @@
+name: astrbot_plugin_memo
+author: Cloud
+desc: 为 LLM 提供持久化备忘录 Tools（memo_read / memo_write），支持分会话/分用户隔离
+version: 1.0.0
+repo: https://github.com/yun474

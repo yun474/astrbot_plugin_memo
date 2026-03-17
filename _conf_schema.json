@@ -1,0 +1,20 @@
+{
+  "split_session": {
+    "description": "按会话隔离备忘录（群聊/私聊各自独立）",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，不同群聊和私聊的备忘录互不干扰"
+  },
+  "split_user": {
+    "description": "按用户隔离备忘录（每个用户拥有独立备忘录）",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，同一会话内不同用户的备忘录互不干扰；可与 split_session 同时开启"
+  },
+  "max_entries": {
+    "description": "每个备忘录最多保留的条目数量",
+    "type": "int",
+    "default": 50,
+    "hint": "超出上限时自动删除最旧的条目，0 表示不限制（不推荐）"
+  }
+}
