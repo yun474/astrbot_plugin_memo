@@ -1,8 +1,8 @@
 """astrbot_plugin_memo
 
-为 AstrBot 提供持久化备忘录/记忆功能，以两个 LLM Tool 的形式注入：
-- memo_read : 读取备忘录
-- memo_write: 写入备忘录
+为 AstrBot 提供持久化备忘录/记忆功能：
+- 通过 on_llm_request 钩子自动将备忘录内容注入 system_prompt（对用户不可见）
+- memo_write LLM Tool：LLM 主动写入备忘录
 
 支持分会话 / 分用户 两个维度的隔离，可在插件配置中独立开关。
 """
@@ -10,6 +10,7 @@
 import json
 import os
 from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 
@@ -62,41 +63,38 @@ def _build_key(event: AstrMessageEvent, split_session: bool, split_user: bool) -
 @register(
     "astrbot_plugin_memo",
     "Cloud",
-    "为 LLM 提供持久化备忘录 Tools（memo_read / memo_write），支持分会话/分用户隔离",
-    "1.0.1",
+    "持久化备忘录：自动注入 system_prompt + memo_write Tool，支持分会话/分用户隔离",
+    "1.1.0",
     "https://github.com/yun474",
 )
 class MemoPlugin(Star):
     def __init__(self, context: Context) -> None:
         super().__init__(context)
         _ensure_dir()
-        # 不在此处缓存配置，每次操作动态读取以响应配置变更
         logger.info("[memo] 插件初始化完成")
 
     def _get_cfg(self) -> tuple[bool, bool, int]:
-        """动态读取配置，确保配置变更后立即生效，无需重启。"""
+        """动态读取配置，确保配置变更后立即生效。"""
         cfg = self.context.get_config()
         return (
-            bool(cfg.get("split_session", True)),
-            bool(cfg.get("split_user", False)),
+            bool(cfg.get("split_session", False)),
+            bool(cfg.get("split_user", True)),
             int(cfg.get("max_entries", 50)),
         )
 
-    @filter.llm_tool(name="memo_read")
-    async def memo_read(self, event: AstrMessageEvent):
-        '''读取当前上下文的持久化备忘录，返回所有已保存的条目。当用户询问你是否记得某件事、或需要回顾历史信息时调用。
-
-        Args:
-        '''
+    @filter.on_llm_request()
+    async def inject_memo(self, event: AstrMessageEvent, req: ProviderRequest):
+        """在每次 LLM 请求前，将备忘录内容注入 system_prompt，对用户不可见。"""
         split_session, split_user, _ = self._get_cfg()
         key = _build_key(event, split_session, split_user)
         data = _load(key)
         entries = data.get("entries", [])
         if not entries:
-            yield event.plain_result("备忘录为空，尚无任何记录。")
             return
-        lines = "\n".join(f"{i + 1}. {e}" for i, e in enumerate(entries))
-        yield event.plain_result(f"备忘录共 {len(entries)} 条：\n{lines}")
+        lines = "\n".join(f"- {e}" for e in entries)
+        memo_prompt = f"\n\n[用户备忘录]\n以下是用户要求你记住的内容，请在回答时参考：\n{lines}"
+        req.system_prompt += memo_prompt
+        logger.debug(f"[memo] 已注入 {len(entries)} 条备忘到 system_prompt，key={key}")
 
     @filter.llm_tool(name="memo_write")
     async def memo_write(self, event: AstrMessageEvent, content: str):
@@ -137,7 +135,7 @@ class MemoPlugin(Star):
             yield event.plain_result("备忘录为空。")
             return
         lines = "\n".join(f"{i + 1}. {e}" for i, e in enumerate(entries))
-        yield event.plain_result(f"📋 备忘录（key: {key}）：\n{lines}")
+        yield event.plain_result(f"备忘录（key: {key}）：\n{lines}")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("memo_clear")
@@ -146,7 +144,7 @@ class MemoPlugin(Star):
         split_session, split_user, _ = self._get_cfg()
         key = _build_key(event, split_session, split_user)
         _save(key, {"entries": []})
-        yield event.plain_result(f"✅ 已清空备忘录（key: {key}）。")
+        yield event.plain_result(f"已清空备忘录（key: {key}）。")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("memo_del")
@@ -162,7 +160,7 @@ class MemoPlugin(Star):
         removed = entries.pop(index - 1)
         data["entries"] = entries
         _save(key, data)
-        yield event.plain_result(f"✅ 已删除第 {index} 条：{removed}")
+        yield event.plain_result(f"已删除第 {index} 条：{removed}")
 
     async def terminate(self):
         logger.info("[memo] 插件已卸载。")
